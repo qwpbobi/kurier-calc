@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Смены курьера</title>
+  <style>
+    :root {
+      --bg: #12141a;
+      --card: #1c1f28;
+      --text: #e8eaf0;
+      --muted: #8b90a0;
+      --accent: #4ade80;
+      --accent2: #fbbf24;
+      --border: #2a2e3a;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", sans-serif;
+           max-width: 560px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 22px; margin: 8px 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-top: 12px; }
+    input { width: 100%; padding: 10px; font-size: 16px; background: var(--bg); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; margin-top: 4px; }
+    label.check { color: var(--text); font-size: 15px; display: flex; align-items: center; gap: 10px; }
+    label.check input { width: 22px; height: 22px; margin: 0; flex-shrink: 0; }
+    button { padding: 12px; font-size: 16px; border: 0; border-radius: 8px; cursor: pointer; }
+    #saveBtn { width: 100%; margin-top: 16px; background: var(--accent); color: #0b1a10; font-weight: 600; }
+    .preview { margin-top: 14px; padding: 12px; background: var(--bg); border-radius: 8px; line-height: 1.7; }
+    .preview b { color: var(--accent); }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat { background: var(--bg); border-radius: 8px; padding: 10px; }
+    .stat span { display: block; font-size: 12px; color: var(--muted); }
+    .stat strong { font-size: 18px; }
+    .monthbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .monthbar button { background: var(--bg); color: var(--text); padding: 6px 14px; border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: right; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 400; font-size: 12px; }
+    tbody tr { cursor: pointer; }
+    tbody tr.active { background: #26402f; }
+    #backBtn { width: 100%; margin-bottom: 12px; padding: 8px; background: var(--bg); color: var(--accent);
+               border: 1px solid var(--accent); font-size: 14px; }
+    .del { background: none; color: var(--muted); padding: 0 6px; font-size: 16px; }
+    svg text { fill: var(--muted); font-size: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Смены курьера</h1>
+
+  <div class="card">
+    <label>Дата <input id="date" type="date"></label>
+    <label>Пробег за смену, км <input id="km" type="number" min="0" step="0.1" inputmode="decimal"></label>
+    <label>Заработано по чекам, ₽ <input id="checks" type="number" min="0" step="1" inputmode="decimal"></label>
+    <label>Количество заказов <input id="orders" type="number" min="0" step="1" inputmode="numeric"></label>
+    <label class="check"><input id="evening" type="checkbox"> Вечерняя смена (6,5 ч). Без галочки: полная смена (13 ч)</label>
+
+    <div class="preview" id="preview"></div>
+    <button id="saveBtn">Сохранить смену</button>
+  </div>
+
+  <div class="card">
+    <div class="monthbar">
+      <button id="prev">←</button>
+      <strong id="monthTitle"></strong>
+      <button id="next">→</button>
+    </div>
+
+    <button id="backBtn" hidden>← Вернуться к статистике месяца</button>
+    <div class="stats" id="stats"></div>
+    <div id="chart" style="margin-top:16px"></div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>День</th><th>Км</th><th>Заказы</th><th>Итог</th><th>Чистыми</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <script>
+    // ---------- Настройки ----------
+    const FIXED_SHIFT = 4600;   // минимальная оплата полной смены, ₽
+    const FIXED_SHIFT_EVENING = 2000; // минимальная оплата вечерней смены, ₽
+    const COST_PER_KM = 15;     // амортизация, ₽ за 1 км
+    const SHIFT_HOURS_FULL = 13;     // длительность полной смены, часов
+    const SHIFT_HOURS_EVENING = 6.5; // длительность вечерней смены, часов
+    const STORAGE_KEY = "courier_days";
+    const MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+
+    // ---------- Расчёты ----------
+    // Итог за день: если по чекам меньше фиксированной смены, платят фиксу
+    function fixedPay(evening) { return evening ? FIXED_SHIFT_EVENING : FIXED_SHIFT; }
+    function dayTotal(checks, evening) { return Math.max(checks, fixedPay(evening)); }
+    // Чистая прибыль = итог - амортизация за пробег
+    function dayNet(day) { return dayTotal(day.checks, day.evening) - day.km * COST_PER_KM; }
+
+    // Сколько часов длилась смена (у вечерней в записи стоит evening: true)
+    function shiftHours(day) { return day.evening ? SHIFT_HOURS_EVENING : SHIFT_HOURS_FULL; }
+
+    // ---------- Хранилище ----------
+    function loadDays() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+      catch (e) { return {}; }
+    }
+    function saveDays(days) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(days)); } catch (e) {}
+    }
+
+    // ---------- Состояние ----------
+    let viewYear, viewMonth; // viewMonth: 0..11
+    let selectedDate = null; // дата выбранной смены ("2026-11-06") или null, если показываем весь месяц
+
+    const $ = id => document.getElementById(id);
+    const rub = n => Math.round(n).toLocaleString("ru-RU") + " ₽";
+
+    function todayStr() {
+      const d = new Date();
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+
+    // ---------- Предпросмотр при вводе ----------
+    function updatePreview() {
+      const km = Number($("km").value) || 0;
+      const checks = Number($("checks").value) || 0;
+      const evening = $("evening").checked;
+      const total = dayTotal(checks, evening);
+      const amort = km * COST_PER_KM;
+      const net = total - amort;
+      const note = checks < fixedPay(evening) ? " (фикс. смена)" : " (по чекам)";
+      $("preview").innerHTML =
+        "Итог за день: <b>" + rub(total) + "</b>" + note + "<br>" +
+        "Амортизация (" + COST_PER_KM + " ₽/км): " + rub(amort) + "<br>" +
+        "Чистая прибыль: <b>" + rub(net) + "</b>";
+    }
+
+    // ---------- Сохранение смены ----------
+    function onSave() {
+      const date = $("date").value;
+      if (!date) { alert("Выбери дату"); return; }
+      const days = loadDays();
+      if (days[date] && !confirm("За " + date + " уже есть запись. Перезаписать?")) return;
+      days[date] = {
+        km: Number($("km").value) || 0,
+        checks: Number($("checks").value) || 0,
+        orders: Number($("orders").value) || 0,
+        evening: $("evening").checked
+      };
+      saveDays(days);
+      const [y, m] = date.split("-").map(Number);
+      viewYear = y; viewMonth = m - 1;
+      selectedDate = null;
+      $("km").value = ""; $("checks").value = ""; $("orders").value = "";
+      $("evening").checked = false; // по умолчанию снова полная смена
+      updatePreview();
+      render();
+    }
+
+    function deleteDay(date) {
+      if (!confirm("Удалить смену " + date + "?")) return;
+      const days = loadDays();
+      delete days[date];
+      saveDays(days);
+      render();
+    }
+
+    // ---------- Отрисовка ----------
+    function monthEntries() {
+      const days = loadDays();
+      const prefix = viewYear + "-" + String(viewMonth + 1).padStart(2, "0") + "-";
+      return Object.keys(days).filter(k => k.startsWith(prefix)).sort().map(k => ({ date: k, ...days[k] }));
+    }
+
+    function render() {
+      const entries = monthEntries();
+
+      // Если выбранной смены нет в этом месяце (например, удалили), возвращаемся к месяцу
+      if (selectedDate && !entries.some(e => e.date === selectedDate)) selectedDate = null;
+
+      // Для сводки берём либо одну выбранную смену, либо весь месяц
+      const statEntries = selectedDate ? entries.filter(e => e.date === selectedDate) : entries;
+
+      $("monthTitle").textContent = selectedDate
+        ? "Смена: " + Number(selectedDate.slice(8)) + " " + MONTHS[viewMonth].toLowerCase()
+        : MONTHS[viewMonth] + " " + viewYear;
+      $("backBtn").hidden = !selectedDate;
+
+      // Сводка (по смене или по месяцу)
+      const sum = f => statEntries.reduce((s, e) => s + f(e), 0);
+      const net = sum(dayNet);
+      const stats = selectedDate ? [
+        //плитки для одной смены
+        ["Заказов", sum(e => e.orders)], 
+        ["Пробег", sum(e => e.km).toLocaleString("ru-RU") + " км"],
+        [selectedDate ? "Оплата за день" : "Оплата за месяц", rub(sum(e => dayTotal(e.checks, e.evening))) + (selectedDate ? (sum(e => e.checks) < fixedPay(statEntries[0].evening) ? " (фикс)" : " (по чекам)") : "")],
+        ["Амортизация", rub(sum(e => e.km * COST_PER_KM))],
+        ["Чистая прибыль", rub(net)],
+        ["Средняя за заказ", sum(e => e.orders) ? rub(net / sum(e => e.orders)) : "—"]
+      ]:[
+        ["Заказов", sum(e => e.orders)], 
+        [selectedDate ? "Оплата за день" : "Оплата за месяц", rub(sum(e => dayTotal(e.checks, e.evening))) + (selectedDate ? (sum(e => e.checks) < fixedPay(statEntries[0].evening) ? " (фикс)" : " (по чекам)") : "")],
+        ["Пробег", sum(e => e.km).toLocaleString("ru-RU") + " км"],
+        ["Амортизация", rub(sum(e => e.km * COST_PER_KM))],
+        ["Чистая прибыль", rub(net)],
+        ["Смен", statEntries.length],
+        ["Средняя за день", statEntries.length ? rub(net / statEntries.length) : "—"],
+        ["Средняя за заказ", sum(e => e.orders) ? rub(net / sum(e => e.orders)) : "—"]
+      ];
+      $("stats").innerHTML = stats.map(s => '<div class="stat"><span>' + s[0] + '</span><strong>' + s[1] + '</strong></div>').join("");
+
+      drawChart(entries);
+
+      // Таблица
+      $("rows").innerHTML = entries.slice().reverse().map(e => {
+        const day = Number(e.date.slice(8));
+        return '<tr data-date="' + e.date + '"' + (e.date === selectedDate ? ' class="active"' : '') + "><td>" + day + (e.evening ? " (веч.)" : "") + "</td><td>" + e.km + "</td><td>" + e.orders + "</td><td>" +
+          rub(dayTotal(e.checks, e.evening)) + "</td><td>" + rub(dayNet(e)) +
+          '</td><td><button class="del" data-date="' + e.date + '">✕</button></td></tr>';
+      }).join("");
+      // Клик по строке выбирает смену; повторный клик по ней снимает выбор
+      document.querySelectorAll("tbody tr").forEach(tr => tr.onclick = () => {
+        selectedDate = (selectedDate === tr.dataset.date) ? null : tr.dataset.date;
+        render();
+      });
+      // Кнопка удаления: stopPropagation, чтобы клик не выбрал строку
+      document.querySelectorAll(".del").forEach(b => b.onclick = ev => {
+        ev.stopPropagation();
+        deleteDay(b.dataset.date);
+      });
+    }
+
+    // График: столбики чистой прибыли по дням месяца (чистый SVG, без библиотек)
+    function drawChart(entries) {
+      const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+      const byDay = {};
+      entries.forEach(e => byDay[Number(e.date.slice(8))] = dayNet(e));
+
+      const W = 520, H = 220, padL = 40, padR = 8, padT = 12, padB = 24;
+      const values = Object.values(byDay);
+      const maxV = Math.max(1000, ...values);
+      const minV = Math.min(0, ...values);
+      const range = maxV - minV;
+      const y = v => padT + (H - padT - padB) * (1 - (v - minV) / range);
+      const slot = (W - padL - padR) / daysInMonth;
+      const barW = slot * 0.7;
+
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Чистая прибыль по дням">';
+
+      // Горизонтальные линии и подписи по оси Y
+      for (let i = 0; i <= 4; i++) {
+        const v = minV + range * i / 4;
+        svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="#2a2e3a"/>';
+        svg += '<text x="' + (padL - 4) + '" y="' + (y(v) + 3) + '" text-anchor="end">' + Math.round(v / 100) / 10 + 'к</text>';
+      }
+
+      // Столбики и подписи дней
+      for (let d = 1; d <= daysInMonth; d++) {
+        const x = padL + (d - 1) * slot + (slot - barW) / 2;
+        if (byDay[d] !== undefined) {
+          const v = byDay[d];
+          const top = Math.min(y(v), y(0));
+          const h = Math.max(1, Math.abs(y(v) - y(0)));
+          svg += '<rect x="' + x + '" y="' + top + '" width="' + barW + '" height="' + h + '" rx="2" fill="' + (v >= 0 ? "#4ade80" : "#f87171") + '" opacity="' + (selectedDate && Number(selectedDate.slice(8)) !== d ? 0.25 : 1) + '"/>';
+        }
+        if (d === 1 || d % 5 === 0) {
+          svg += '<text x="' + (x + barW / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + d + '</text>';
+        }
+      }
+      svg += '</svg>';
+      $("chart").innerHTML = svg;
+    }
+
+    // ---------- Запуск ----------
+    const now = new Date();
+    viewYear = now.getFullYear();
+    viewMonth = now.getMonth();
+    $("date").value = todayStr();
+    ["km", "checks"].forEach(id => $(id).addEventListener("input", updatePreview));
+    $("evening").addEventListener("change", updatePreview);
+    $("saveBtn").onclick = onSave;
+    $("prev").onclick = () => { selectedDate = null; viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } render(); };
+    $("next").onclick = () => { selectedDate = null; viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; } render(); };
+    $("backBtn").onclick = () => { selectedDate = null; render(); };
+    updatePreview();
+    render();
+  </script>
+</body>
+</html>
