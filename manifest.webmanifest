@@ -1,0 +1,10 @@
+{
+  "name": "Смены курьера",
+  "short_name": "Смены",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#12141a",
+  "theme_color": "#12141a",
+  "lang": "ru"
+}

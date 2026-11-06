@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Смены курьера</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#12141a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Смены">
   <style>
     :root {
       --bg: #12141a;
@@ -292,6 +296,12 @@
     $("backBtn").onclick = () => { selectedDate = null; render(); };
     updatePreview();
     render();
+  </script>
+  <script>
+    // Кэш на телефоне (только при открытии по https, локально из файла не включается)
+    if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+      navigator.serviceWorker.register("sw.js").catch(function () {});
+    }
   </script>
 </body>
 </html>
