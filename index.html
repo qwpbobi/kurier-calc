@@ -22,6 +22,13 @@
     label { display: block; font-size: 13px; color: var(--muted); margin-top: 12px; }
     input { width: 100%; padding: 10px; font-size: 16px; background: var(--bg); color: var(--text);
             border: 1px solid var(--border); border-radius: 8px; margin-top: 4px; }
+    /* одинаковая высота и ширина у всех полей, включая дату на iPhone */
+    input:not([type="checkbox"]) { height: 44px; min-width: 0; max-width: 100%; display: block; }
+    input[type="date"] { -webkit-appearance: none; appearance: none; text-align: left; line-height: 1.2; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; min-height: 1.2em; }
+    .brand { display: flex; align-items: baseline; gap: 10px; margin: 8px 0 2px; }
+    .brand b { font-size: 28px; letter-spacing: 6px; }
+    .brand span { font-size: 12px; color: var(--muted); }
     label.check { color: var(--text); font-size: 15px; display: flex; align-items: center; gap: 10px; }
     label.check input { width: 22px; height: 22px; margin: 0; flex-shrink: 0; }
     button { padding: 12px; font-size: 16px; border: 0; border-radius: 8px; cursor: pointer; }
@@ -47,6 +54,7 @@
   </style>
 </head>
 <body>
+  <div class="brand"><b>SUME</b><span>sushi bar · Владимир</span></div>
   <h1>Смены курьера</h1>
 
   <div class="card">
