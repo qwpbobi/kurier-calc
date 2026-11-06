@@ -55,6 +55,10 @@
                border: 1px solid var(--accent); font-size: 14px; }
     .del { background: none; color: var(--muted); padding: 0 6px; font-size: 16px; }
     svg text { fill: var(--muted); font-size: 10px; }
+    .note { font-size: 13px; color: var(--muted); margin: 8px 0; line-height: 1.5; }
+    button.sec { width: 100%; margin-top: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+    textarea { width: 100%; margin-top: 8px; padding: 10px; font-size: 16px; background: var(--bg); color: var(--text);
+               border: 1px solid var(--border); border-radius: 8px; }
   </style>
 </head>
 <body>
@@ -89,6 +93,15 @@
       <thead><tr><th>День</th><th>Км</th><th>Заказы</th><th>Итог</th><th>Чистыми</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
+  </div>
+
+  <div class="card">
+    <b>Резервная копия</b>
+    <p class="note">Смен в памяти этого браузера: <b id="cnt">0</b>. <span id="lastBackup"></span></p>
+    <p class="note">Данные хранятся только на этом устройстве и в этом браузере. Safari и иконка на экране «Домой» хранят их отдельно.</p>
+    <button id="copyBtn" class="sec">Скопировать копию</button>
+    <textarea id="backup" rows="4" placeholder="Сюда вставь текст копии и нажми «Восстановить»"></textarea>
+    <button id="restoreBtn" class="sec">Восстановить из текста</button>
   </div>
 
   <script>
@@ -184,7 +197,41 @@
       return Object.keys(days).filter(k => k.startsWith(prefix)).sort().map(k => ({ date: k, ...days[k] }));
     }
 
+    // ---------- Резервная копия ----------
+    const BACKUP_KEY = "courier_last_backup";
+    function updateBackupInfo() {
+      $("cnt").textContent = Object.keys(loadDays()).length;
+      let last = "";
+      try { last = localStorage.getItem(BACKUP_KEY) || ""; } catch (e) {}
+      $("lastBackup").textContent = last ? "Последняя копия: " + last + "." : "Копию ещё не делали.";
+    }
+    function copyBackup() {
+      const text = JSON.stringify(loadDays());
+      const ta = $("backup");
+      ta.value = text;
+      const done = () => {
+        try { localStorage.setItem(BACKUP_KEY, todayStr()); } catch (e) {}
+        updateBackupInfo();
+        alert("Копия скопирована. Вставь её в Заметки или отправь себе в Telegram.");
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, () => { ta.select(); alert("Выдели текст в поле ниже и скопируй вручную."); });
+      } else { ta.select(); alert("Выдели текст в поле ниже и скопируй вручную."); }
+    }
+    function restoreBackup() {
+      let data;
+      try { data = JSON.parse($("backup").value.trim()); } catch (e) { alert("Не получилось прочитать текст копии."); return; }
+      const keys = (data && typeof data === "object" && !Array.isArray(data)) ? Object.keys(data) : [];
+      const ok = keys.length > 0 && keys.every(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && data[k] && typeof data[k].km === "number" && typeof data[k].checks === "number");
+      if (!ok) { alert("Это не похоже на копию смен. Ничего не изменено."); return; }
+      if (!confirm("Добавить смен: " + keys.length + "? Если дата уже есть, запись заменится.")) return;
+      saveDays({ ...loadDays(), ...data });
+      $("backup").value = "";
+      render();
+    }
+
     function render() {
+      updateBackupInfo();
       const entries = monthEntries();
 
       // Если выбранной смены нет в этом месяце (например, удалили), возвращаемся к месяцу
@@ -291,6 +338,10 @@
     ["km", "checks"].forEach(id => $(id).addEventListener("input", updatePreview));
     $("evening").addEventListener("change", updatePreview);
     $("saveBtn").onclick = onSave;
+    $("copyBtn").onclick = copyBackup;
+    $("restoreBtn").onclick = restoreBackup;
+    // Просим браузер не удалять данные при нехватке места (где поддерживается)
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     $("prev").onclick = () => { selectedDate = null; viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } render(); };
     $("next").onclick = () => { selectedDate = null; viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; } render(); };
     $("backBtn").onclick = () => { selectedDate = null; render(); };

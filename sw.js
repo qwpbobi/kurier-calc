@@ -1,6 +1,6 @@
 // Сервис-воркер: хранит страницу на телефоне, чтобы она открывалась мгновенно и без интернета.
 // Стратегия: сразу отдаём сохранённую копию, а в фоне скачиваем свежую (обновится при следующем открытии).
-const CACHE = "kurier-v1";
+const CACHE = "kurier-v2";
 const FILES = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
